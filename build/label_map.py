@@ -1,71 +1,92 @@
 #!/usr/bin/env python3
-"""Build the treasure map entry image.
+"""Compose the labelled treasure map for "Charm the Cartographers".
 
-The base artwork (assets/base.webp) is an AI-drawn antique map with no
-lettering on it — generated text garbles, so every place name is
-typeset here instead, in a bold serif with a parchment halo, placed
-next to the feature it names. The island is the Isle of Spare Keys;
-its nine labeled places are:
+The AI-generated base (assets/base.webp) carries no lettering, because
+generated text comes out garbled. All wording is set here instead:
+each place name is rendered in DejaVu Serif (bold for the landmarks,
+regular for the asides) with dark ink and a parchment-coloured halo so
+it stays readable over the busy map artwork.
 
-  Mt. Probably Harmless        the volcano (it is not harmless)
-  the S.S. Wrong Turn          the ship that missed the island
-  Bay of Lost Socks            the crescent bay (single socks only)
-  Lake Excuses                 the pond, for why the gold is late
-  The Overconfident Peaks      the mountain range
-  X — Definitely Not a Trap    the hill with the X
-  Forest of Mild Inconvenience the palm forest
-  Kevin (he's friendly)        the whale
-  here be mildly annoyed dragons   the sea serpents' waters
+Labels are described in a table below as (text, x, y, point size,
+rotation in degrees, light?) where x/y are fractions of the canvas
+edge, so the layout scales with the base image. After every label is
+drawn, the canvas is downscaled to 1024x1024 and palette-quantised to
+256 colours so the PNG stays comfortably under the 1 MiB size gate.
 
-Output: assets/map.png at exactly 1024x1024, palette-quantised to
-stay under the competition's 1 MiB gate.
+Run:  python3 build/label_map.py   (writes assets/map.png)
 """
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = Path(__file__).resolve().parent.parent
-BASE = ROOT / "assets" / "base.webp"
-OUT = ROOT / "assets" / "map.png"
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-FONT_LIGHT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+SRC = ROOT / "assets" / "base.webp"
+DST = ROOT / "assets" / "map.png"
+
+BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+
 INK = (56, 40, 22)
-HALO = (233, 217, 176)
+GLOW = (233, 217, 176)
+STROKE = 3
+PAD = 14
 
-img = Image.open(BASE).convert("RGB")
-W, H = img.size  # 1600x1600; labels drawn at this scale, then downscaled
-
-
-def label(text, fx, fy, size, angle=0, light=False):
-    """Draw one rotated label centred near fractional position (fx, fy)."""
-    font = ImageFont.truetype(FONT_LIGHT if light else FONT, size)
-    tmp = Image.new("RGBA", (10, 10))
-    td = ImageDraw.Draw(tmp)
-    box = td.textbbox((0, 0), text, font=font, stroke_width=3)
-    tw, th = box[2] - box[0] + 24, box[3] - box[1] + 24
-    layer = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(layer)
-    ld.text((12 - box[0], 12 - box[1]), text, font=font, fill=INK + (255,),
-            stroke_width=3, stroke_fill=HALO + (255,))
-    layer = layer.rotate(angle, expand=True, resample=Image.BICUBIC)
-    x = int(fx * W - layer.width / 2)
-    y = int(fy * H - layer.height / 2)
-    img.paste(layer, (x, y), layer)
+# text, centre-x, centre-y, size, angle, light (regular instead of bold)
+LABELS = [
+    ("THE ISLE OF SPARE KEYS", 0.285, 0.062, 46, 0, False),
+    ("Mt. Probably Harmless", 0.215, 0.245, 38, -4, False),
+    ("the S.S. Wrong Turn", 0.625, 0.232, 34, 0, True),
+    ("Bay of Lost Socks", 0.175, 0.345, 38, -10, False),
+    ("Lake Excuses", 0.565, 0.408, 34, 0, False),
+    ("The Overconfident Peaks", 0.715, 0.292, 36, -5, False),
+    ("X — Definitely Not a Trap", 0.335, 0.552, 36, 3, False),
+    ("Forest of Mild Inconvenience", 0.475, 0.822, 38, 0, False),
+    ("here be mildly annoyed dragons", 0.235, 0.918, 32, 0, True),
+    ("Kevin (he's friendly)", 0.615, 0.90, 32, 0, True),
+]
 
 
-label("THE ISLE OF SPARE KEYS", 0.285, 0.062, 46)
-label("Mt. Probably Harmless", 0.215, 0.245, 38, angle=-4)
-label("the S.S. Wrong Turn", 0.625, 0.232, 34, light=True)
-label("Bay of Lost Socks", 0.175, 0.345, 38, angle=-10)
-label("Lake Excuses", 0.565, 0.408, 34)
-label("The Overconfident Peaks", 0.715, 0.292, 36, angle=-5)
-label("X — Definitely Not a Trap", 0.335, 0.552, 36, angle=3)
-label("Forest of Mild Inconvenience", 0.475, 0.822, 38)
-label("here be mildly annoyed dragons", 0.235, 0.918, 32, light=True)
-label("Kevin (he's friendly)", 0.615, 0.90, 32, light=True)
+def make_label_layer(text, size, light):
+    """Render one label onto its own transparent layer."""
+    font = ImageFont.truetype(REGULAR if light else BOLD, size)
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    left, top, right, bottom = probe.textbbox(
+        (0, 0), text, font=font, stroke_width=STROKE)
+    layer = Image.new(
+        "RGBA", (right - left + 2 * PAD, bottom - top + 2 * PAD),
+        (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.text((PAD - left, PAD - top), text, font=font,
+              fill=INK + (255,), stroke_width=STROKE,
+              stroke_fill=GLOW + (255,))
+    return layer
 
-img = img.resize((1024, 1024), Image.LANCZOS)
-img = img.quantize(colors=256, method=Image.MEDIANCUT,
-                   dither=Image.FLOYDSTEINBERG)
-img.save(OUT, optimize=True)
-print("saved", OUT)
+
+def compose():
+    canvas = Image.open(SRC).convert("RGB")
+    width, height = canvas.size
+    for text, fx, fy, size, angle, light in LABELS:
+        layer = make_label_layer(text, size, light)
+        if angle:
+            layer = layer.rotate(angle, expand=True,
+                                 resample=Image.BICUBIC)
+        px = round(fx * width - layer.width / 2)
+        py = round(fy * height - layer.height / 2)
+        canvas.paste(layer, (px, py), layer)
+    return canvas
+
+
+def main():
+    canvas = compose()
+    canvas = canvas.resize((1024, 1024), Image.LANCZOS)
+    palette_img = canvas.quantize(
+        colors=256, method=Image.MEDIANCUT, dither=Image.FLOYDSTEINBERG)
+    palette_img.save(DST, optimize=True)
+    size = DST.stat().st_size
+    print(f"wrote {DST} ({size} bytes)")
+    assert size < 1024 * 1024, "map.png exceeds the 1 MiB gate"
+
+
+if __name__ == "__main__":
+    main()

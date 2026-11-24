@@ -1,37 +1,49 @@
 #!/usr/bin/env python3
-"""Entry program for make.fun "Charm the Cartographers".
+"""Publish the finished treasure map as the competition entry.
 
-The treasure map is composed ahead of time by build/label_map.py and
-stored in assets/map.png. This program's only job is to publish those
-exact bytes to /output/entry.png, so every run of the entry produces
-the identical map.
+The map itself is composed ahead of time by build/label_map.py and
+committed as assets/map.png. This entry program performs no drawing:
+it copies those committed bytes to /output/entry.png and then reads
+the copy back to confirm its SHA-256 matches the source, guaranteeing
+the judged file is exactly the map that was reviewed.
+
+Exit status is 0 on success, 1 if the source is missing or the copy
+does not verify.
 """
 import hashlib
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-SOURCE = ROOT / "assets" / "map.png"
-DEST_DIR = Path("/output")
-DEST = DEST_DIR / "entry.png"
+ENTRY_DIR = Path(__file__).resolve().parent
+MAP_FILE = ENTRY_DIR / "assets" / "map.png"
+OUT_DIR = Path("/output")
+OUT_FILE = OUT_DIR / "entry.png"
 
 
-def publish() -> int:
-    if not SOURCE.is_file():
-        print(f"source image missing: {SOURCE}", file=sys.stderr)
-        return 1
-    payload = SOURCE.read_bytes()
-    DEST_DIR.mkdir(parents=True, exist_ok=True)
-    with DEST.open("wb") as fh:
-        fh.write(payload)
-    written = DEST.read_bytes()
-    if hashlib.sha256(written).digest() != hashlib.sha256(payload).digest():
-        print("verification failed: written bytes differ from source",
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def run() -> int:
+    if not MAP_FILE.exists():
+        print(f"error: committed map not found at {MAP_FILE}",
               file=sys.stderr)
         return 1
-    print(f"published {DEST} ({len(written)} bytes, sha256 verified)")
+
+    blob = MAP_FILE.read_bytes()
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_FILE.write_bytes(blob)
+
+    copied = OUT_FILE.read_bytes()
+    if digest(copied) != digest(blob):
+        print("error: /output/entry.png failed SHA-256 verification",
+              file=sys.stderr)
+        return 1
+
+    print(f"entry.png written: {len(copied)} bytes, "
+          f"sha256 {digest(copied)}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(publish())
+    sys.exit(run())
